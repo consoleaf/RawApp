@@ -1,13 +1,14 @@
 # This Python file uses the following encoding: utf-8
 import sys
+import os
 import time
 from threading import Thread
 
 try:
     from PySide2.QtWidgets import QApplication, QMainWindow, QLabel, QPushButton, QFileDialog, QLineEdit, QCheckBox, \
-    QProgressBar
+        QProgressBar, QMessageBox, QWidget
     from PySide2.QtUiTools import QUiLoader
-    from PySide2.QtCore import QFile, QObject
+    from PySide2.QtCore import QFile, QObject, QRunnable, Slot, QThreadPool, Signal, SIGNAL
 except ModuleNotFoundError:
     import pip
     import os
@@ -59,30 +60,89 @@ class MainWindow(QObject):
         self.stopButton: QPushButton = self.window.findChild(QPushButton, "stopButton")
         self.stopButton.clicked.connect(self.stop_handler)
 
-        self.mainThread: Thread = None
+        self.worker: Worker = None
         self.running = False
+
+        self.thread_pool = QThreadPool()
+        print("Multi threading with maximum %d threads" % self.thread_pool.maxThreadCount())
+
+        self.msg_box = QMessageBox(parent=self.window)
+        self.msg_box.setIcon(QMessageBox.Critical)
+        self.msg_box.setWindowTitle("Некорректные настройки")
 
         self.window.destroyed.connect(self.stop_handler)
         self.window.show()
 
     def start_handler(self):
-        self.running = True
-        self.mainThread = Thread(target=self.main)
-        self.mainThread.start()
+        if self.thread_pool.activeThreadCount() > 0:
+            return
+        if self.check_inputs():
+            self.worker = Worker(self)
+            self.worker.signals.updated.connect(self.worker_upd_handler)
+            self.worker.running = True
+            self.thread_pool.start(self.worker)
         return
 
     def stop_handler(self):
-        self.running = False
+        self.worker.running = False
+        self.thread_pool.waitForDone(1000)
         return
+
+    def worker_upd_handler(self, data):
+        if data["sortBar"]:
+            self.sortBar.setValue(data["sortBar"])
+        if data["moveBar"]:
+            self.moveBar.setValue(data["moveBar"])
 
     def dir_btn_handler(self):
         dialog = QFileDialog()
         dirname = dialog.getExistingDirectory()
         self.dirPath.setText(dirname)
 
-    def main(self):
-        return
+    def check_inputs(self):
+        errors = []
+        if not os.path.exists(self.dirPath.text()):
+            errors.append("Выбранная папка не существует")
+        if self.moveRepeatFiles.isChecked() and len(self.repeatFiles_dir.text()) < 1:
+            errors.append("Введите название папки для переноса повторяющихся файлов")
+        if self.moveSingleFiles.isChecked() and len(self.singleFiles_dir.text()) < 1:
+            errors.append("Введите название папки для переноса одиночных файлов")
+        if errors:
+            self.msg_box.setText("\n".join(errors))
+            self.msg_box.exec()
+            return False
+        return True
 
+
+class Worker(QRunnable):
+    """
+    Worker thread
+    """
+
+    class Signals(QObject):
+        updated = Signal(dict)
+
+    def __init__(self, parent):
+        """
+
+        :type parent: MainWindow
+        """
+
+        super().__init__()
+        self.my_parent = parent
+        self.running = False
+        self.signals = self.Signals()
+
+    @Slot()
+    def run(self):
+        for i in range(101):
+            if not self.running:
+                return
+            self.signals.updated.emit({
+                "sortBar": i * 2,
+                "moveBar": i
+            })
+            time.sleep(0.1)
 
 
 if __name__ == "__main__":
