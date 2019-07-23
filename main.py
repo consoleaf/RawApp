@@ -1,4 +1,5 @@
 # This Python file uses the following encoding: utf-8
+import re
 import sys
 import os
 import time
@@ -89,9 +90,9 @@ class MainWindow(QObject):
         return
 
     def worker_upd_handler(self, data):
-        if data["sortBar"]:
+        if "sortBar" in data.keys():
             self.sortBar.setValue(data["sortBar"])
-        if data["moveBar"]:
+        if "moveBar" in data.keys():
             self.moveBar.setValue(data["moveBar"])
 
     def dir_btn_handler(self):
@@ -135,14 +136,71 @@ class Worker(QRunnable):
 
     @Slot()
     def run(self):
-        for i in range(101):
-            if not self.running:
-                return
-            self.signals.updated.emit({
-                "sortBar": i * 2,
-                "moveBar": i
-            })
-            time.sleep(0.1)
+        dir_path = self.my_parent.dirPath.text()
+
+        moveSingles = self.my_parent.moveSingleFiles.isChecked()
+        moveRepeats = self.my_parent.moveRepeatFiles.isChecked()
+
+        singles_dir = self.my_parent.singleFiles_dir.text()
+        singles_dir = os.path.join(dir_path, singles_dir)
+        repeats_dir = self.my_parent.repeatFiles_dir.text()
+        repeats_dir = os.path.join(dir_path, repeats_dir)
+
+        if not moveSingles:
+            singles_dir = dir_path
+        if not moveRepeats:
+            repeats_dir = dir_path
+
+        print(singles_dir, repeats_dir)
+
+        filesList = [file for file in os.listdir(dir_path) if os.path.isfile(os.path.join(dir_path, file))]
+        data = {}
+        for i in range(len(filesList)):
+            tmp = re.match(r"(.*)\.([^.]+)", filesList[i])
+            if tmp[1] not in data.keys():
+                data[tmp[1]] = []
+            data[tmp[1]].append(tmp[2])
+            self.signals.updated.emit({"sortBar": (i + 1) / len(filesList) * 100})
+        self.signals.updated.emit({"sortBar": 100})
+
+        cnt = 0
+
+        if not os.path.exists(singles_dir):
+            os.makedirs(singles_dir)
+        if not os.path.exists(repeats_dir):
+            os.makedirs(repeats_dir)
+
+        for filename, filetypes in data.items():
+            # print(filename, filetypes)
+            dirname = repeats_dir
+            if len(filetypes) == 1:
+                dirname = singles_dir
+            for filetype in filetypes:
+                dirname = os.path.normpath(dirname)
+                print("DIRNAME:", dirname)
+                name = "{}.{}".format(filename, filetype)
+                name1 = os.path.join(dir_path, name)
+                name1 = os.path.normpath(name1)
+                name2 = os.path.join(dirname, name)
+                name2 = os.path.normpath(name2)
+                print(name1, "====>>>", name2)
+                os.rename(name1, name2)
+                cnt += 1
+                self.signals.updated.emit({
+                    "moveBar": cnt / len(filesList) * 100
+                })
+        self.signals.updated.emit({
+            "moveBar": 100
+        })
+
+        # for i in range(101):
+        #     if not self.running:
+        #         return
+        #     self.signals.updated.emit({
+        #         "sortBar": i * 2,
+        #         "moveBar": i
+        #     })
+        #     time.sleep(0.1)
 
 
 if __name__ == "__main__":
